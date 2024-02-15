@@ -70,3 +70,113 @@ func (cart *CartAdapter) AddToCart(req entities.CartItems, userId uint) error {
 	}
 	return nil
 }
+
+func (cart *CartAdapter) GetAllFromCart(userId uint) ([]entities.CartItems, error) {
+	var res []entities.CartItems
+	var cartId uint
+
+	query := "SELECT id FROM carts WHERE user_id = ?"
+	if err := cart.DB.Raw(query, userId).Scan(&cartId).Error; err != nil {
+		return nil, err
+	}
+
+	queryItems := "SELECT * FROM cart_items WHERE cart_id = ?"
+	if err := cart.DB.Raw(queryItems, cartId).Scan(&res).Error; err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (cart *CartAdapter) RemoveFromCart(req entities.CartItems, userId uint) error {
+
+	tx := cart.DB.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	var cartId uint
+	query := "SELECT id FROM carts WHERE user_id = ?"
+	if err := cart.DB.Raw(query, userId).Scan(&cartId).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	var current entities.CartItems
+	queryItems := "SELECT * FROM cart_items WHERE cart_id = $1 AND product_id = $2"
+	if err := cart.DB.Raw(queryItems, cartId, req.ProductId).Scan(&current).Error; err != nil {
+		tx.Rollback()
+		return fmt.Errorf("there is no such product in cart")
+	}
+
+	if current.ProductId == 0 {
+		return fmt.Errorf("there is no such product in cart")
+	}
+	if current.Quantity <= 0 {
+		return fmt.Errorf("there is no such product in cart")
+	}
+
+	queryUpdate := "UPDATE cart_items SET quantity = quantity - 1 WHERE cart_id = $1 AND product_id = $2"
+	if err := cart.DB.Exec(queryUpdate, cartId, req.ProductId).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	var quantity int
+	queryUpdateTotal := "UPDATE cart_items SET total = total - $1 WHERE cart_id = $2 AND product_id = $3 RETURNING quantity"
+	if err := cart.DB.Raw(queryUpdateTotal, req.Total, cartId, req.ProductId).Scan(&quantity).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	if quantity == 0 {
+		queryDelete := "DELETE FROM cart_items WHERE cart_id = $1 AND product_id = $2"
+		if err := cart.DB.Exec(queryDelete, cartId, req.ProductId).Error; err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	if err := tx.Commit().Error; err != nil {
+		return fmt.Errorf("error while commiting")
+	}
+	return nil
+}
+
+func (cart *CartAdapter) IsEmpty(req entities.CartItems, userId uint) bool {
+
+	var cartId uint
+	queryId := "SELECT id FROM carts WHERE user_id = ?"
+	if err := cart.DB.Raw(queryId, userId).Scan(&cartId).Error; err != nil {
+		return true
+	}
+	var cartItem entities.CartItems
+	queryCheck := "SELECT * FROM cart_items WHERE cart_id = ?"
+	if err := cart.DB.Raw(queryCheck, cartId).Scan(&cartItem).Error; err != nil {
+		return true
+	}
+
+	if cartItem.CartId == 0 {
+		return true
+	}
+
+	return false
+}
+
+func (cart *CartAdapter) TruncateCart(userId int) error {
+	var cartId int
+	queryId := "SELECT id FROM carts WHERE user_id = ?"
+	if err := cart.DB.Raw(queryId, userId).Scan(&cartId).Error; err != nil {
+		return err
+	}
+	query := "DELETE FROM cart_items WHERE car_id = ?"
+	tx := cart.DB.Begin()
+	if err := tx.Exec(query, cartId).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	return nil
+}

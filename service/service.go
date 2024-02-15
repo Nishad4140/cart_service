@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 var (
@@ -74,6 +75,56 @@ func (cart *CartService) AddToCart(ctx context.Context, req *pb.AddToCartRequest
 	}
 
 	return res, nil
+}
+
+func (cart *CartService) GetAllCart(req *pb.CartCreate, srv pb.CartService_GetAllCartServer) error {
+	cartItems, err := cart.Adapter.GetAllFromCart(uint(req.UserId))
+	if err != nil {
+		return err
+	}
+
+	for _, item := range cartItems {
+		if err := srv.Send(&pb.GetAllCartResponse{
+			UserId:    req.UserId,
+			ProductId: uint32(item.ProductId),
+			Quantity:  int32(item.Quantity),
+			Total:     float32(item.Total),
+		}); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (cart *CartService) RemoveCart(ctx context.Context, req *pb.RemoveCartRequest) (*pb.CartResponse, error) {
+	productData, err := ProductClient.GetProduct(context.TODO(), &pb.GetProductByID{Id: uint32(req.ProdId)})
+	if err != nil {
+		return nil, fmt.Errorf("there is no such product")
+	}
+	if productData.Name == "" {
+		return nil, fmt.Errorf("there is no such product")
+	}
+	reqEntity := entities.CartItems{
+		ProductId: uint(req.ProdId),
+		Total:     float64(productData.Price),
+	}
+	if err := cart.Adapter.RemoveFromCart(reqEntity, uint(req.UserId)); err != nil {
+		return nil, err
+	}
+
+	res := &pb.CartResponse{
+		UserId:  req.UserId,
+		IsEmpty: cart.Adapter.IsEmpty(reqEntity, uint(req.UserId)),
+	}
+	return res, nil
+}
+
+func (cart *CartService) TruncateCart(ctx context.Context, req *pb.CartCreate) (*emptypb.Empty, error) {
+	if err := cart.Adapter.TruncateCart(int(req.UserId)); err != nil {
+		return &emptypb.Empty{}, err
+	}
+	return &emptypb.Empty{}, nil
 }
 
 type HealthChecker struct {
