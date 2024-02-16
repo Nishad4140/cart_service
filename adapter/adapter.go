@@ -165,11 +165,12 @@ func (cart *CartAdapter) IsEmpty(req entities.CartItems, userId uint) bool {
 
 func (cart *CartAdapter) TruncateCart(userId int) error {
 	var cartId int
+	fmt.Println("hii")
 	queryId := "SELECT id FROM carts WHERE user_id = ?"
 	if err := cart.DB.Raw(queryId, userId).Scan(&cartId).Error; err != nil {
 		return err
 	}
-	query := "DELETE FROM cart_items WHERE car_id = ?"
+	query := "DELETE FROM cart_items WHERE cart_id = ?"
 	tx := cart.DB.Begin()
 	if err := tx.Exec(query, cartId).Error; err != nil {
 		tx.Rollback()
